@@ -6,6 +6,7 @@ struct NarratorApp: App {
     @StateObject private var settings: VoiceSettings
     @StateObject private var modelStore: KokoroModelStore
     @StateObject private var player: NarrationPlayer
+    @StateObject private var refiner: SpeakerRefiner
 
     init() {
         let library = LibraryStore()
@@ -14,7 +15,9 @@ struct NarratorApp: App {
         _library = StateObject(wrappedValue: library)
         _settings = StateObject(wrappedValue: settings)
         _modelStore = StateObject(wrappedValue: modelStore)
-        _player = StateObject(wrappedValue: NarrationPlayer(library: library, settings: settings, modelStore: modelStore))
+        let player = NarrationPlayer(library: library, settings: settings, modelStore: modelStore)
+        _player = StateObject(wrappedValue: player)
+        _refiner = StateObject(wrappedValue: SpeakerRefiner(library: library, player: player))
     }
 
     var body: some Scene {
@@ -24,6 +27,7 @@ struct NarratorApp: App {
                 .environmentObject(settings)
                 .environmentObject(modelStore)
                 .environmentObject(player)
+                .environmentObject(refiner)
                 .tint(.narratorAccent)
                 // "Open in Narrator" from Files, Mail, Safari or the share sheet.
                 .onOpenURL { url in

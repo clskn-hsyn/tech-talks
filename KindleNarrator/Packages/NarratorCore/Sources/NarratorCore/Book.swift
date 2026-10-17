@@ -11,13 +11,28 @@ public struct Book: Codable, Identifiable, Sendable, Equatable {
     public var author: String?
     public var format: SourceFormat
     public var chapters: [Chapter]
+    /// Characters who speak, most lines first. Built by `DialogueAnalyzer`.
+    public var cast: [CastMember]
 
-    public init(id: UUID = UUID(), title: String, author: String?, format: SourceFormat, chapters: [Chapter]) {
+    public init(id: UUID = UUID(), title: String, author: String?, format: SourceFormat, chapters: [Chapter], cast: [CastMember] = []) {
         self.id = id
         self.title = title
         self.author = author
         self.format = format
         self.chapters = chapters
+        self.cast = cast
+    }
+
+    enum CodingKeys: String, CodingKey { case id, title, author, format, chapters, cast }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        author = try c.decodeIfPresent(String.self, forKey: .author)
+        format = try c.decode(SourceFormat.self, forKey: .format)
+        chapters = try c.decode([Chapter].self, forKey: .chapters)
+        cast = try c.decodeIfPresent([CastMember].self, forKey: .cast) ?? []
     }
 
     public var sentenceCount: Int { chapters.reduce(0) { $0 + $1.sentences.count } }
@@ -107,15 +122,53 @@ public struct Chapter: Codable, Sendable, Equatable {
     public var paragraphEnds: Set<Int>
     /// Front or back matter (copyright, contents, acknowledgements…) that playback skips by default.
     public var isAuxiliary: Bool
+    /// For sentences that contain quoted speech: the sentence split into narration and dialogue
+    /// pieces, each dialogue piece tagged with its speaker. Sentences without quotes aren't listed.
+    public var dialogue: [Int: [SpeechSegment]]
+    /// Set once the on-device language model has checked this chapter's speakers.
+    public var speakersRefined: Bool
 
-    public init(title: String, sentences: [String], paragraphEnds: Set<Int> = [], isAuxiliary: Bool = false) {
+    public init(title: String, sentences: [String], paragraphEnds: Set<Int> = [], isAuxiliary: Bool = false,
+                dialogue: [Int: [SpeechSegment]] = [:], speakersRefined: Bool = false) {
         self.title = title
         self.sentences = sentences
         self.paragraphEnds = paragraphEnds
         self.isAuxiliary = isAuxiliary
+        self.dialogue = dialogue
+        self.speakersRefined = speakersRefined
+    }
+
+    enum CodingKeys: String, CodingKey { case title, sentences, paragraphEnds, isAuxiliary, dialogue, speakersRefined }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decode(String.self, forKey: .title)
+        sentences = try c.decode([String].self, forKey: .sentences)
+        paragraphEnds = try c.decodeIfPresent(Set<Int>.self, forKey: .paragraphEnds) ?? []
+        isAuxiliary = try c.decodeIfPresent(Bool.self, forKey: .isAuxiliary) ?? false
+        dialogue = try c.decodeIfPresent([Int: [SpeechSegment]].self, forKey: .dialogue) ?? [:]
+        speakersRefined = try c.decodeIfPresent(Bool.self, forKey: .speakersRefined) ?? false
     }
 
     public var characterCount: Int { sentences.reduce(0) { $0 + $1.count } }
+
+    /// What to say for sentence `index`, in order, with who says each piece (nil = the narrator).
+    public func segments(forSentence index: Int) -> [SpeechSegment] {
+        if let pieces = dialogue[index], !pieces.isEmpty { return pieces }
+        return [SpeechSegment(text: sentences[index], isDialogue: false, speaker: nil)]
+    }
+
+    /// Sentence index ranges for each paragraph, in order.
+    public var paragraphRanges: [Range<Int>] {
+        var ranges: [Range<Int>] = []
+        var start = 0
+        for end in paragraphEnds.sorted() where end >= start && end < sentences.count {
+            ranges.append(start..<(end + 1))
+            start = end + 1
+        }
+        if start < sentences.count { ranges.append(start..<sentences.count) }
+        return ranges
+    }
 }
 
 public struct BookPosition: Codable, Hashable, Sendable, Comparable {

@@ -99,12 +99,14 @@ public struct EPUBParser {
             if !chapter.sentences.isEmpty { chapters.append(chapter) }
         }
         guard !chapters.isEmpty else { throw EPUBError.noReadableText }
+        let cast = DialogueAnalyzer.analyze(&chapters)
 
         return Book(
             title: metadata.title ?? fallbackTitle,
             author: metadata.author,
             format: .epub,
-            chapters: chapters
+            chapters: chapters,
+            cast: cast
         )
     }
 

@@ -43,7 +43,8 @@ final class KokoroSpeechEngine: SpeechEngine {
         #endif
     }
 
-    let voiceName: String
+    /// The narrator voice; character voices are passed per call.
+    var voiceName: String
     private let worker: KokoroWorker
 
     init(modelURL: URL, voicesURL: URL, voiceName: String) {
@@ -59,9 +60,14 @@ final class KokoroSpeechEngine: SpeechEngine {
         get async { await worker.isLoaded }
     }
 
-    func render(_ text: String) async throws -> AVAudioPCMBuffer {
+    var supportsCharacterVoices: Bool { true }
+
+    func render(_ text: String, voice: String?) async throws -> AVAudioPCMBuffer {
         guard Self.isSupportedOnThisDevice else { throw KokoroError.unsupportedDevice }
-        let samples = try await worker.synthesize(text, voiceName: voiceName)
+        // Pronunciation follows the narrator's accent for every voice, so the phonemizer
+        // isn't switched back and forth between American and British mid-conversation.
+        let language: Language = voiceName.hasPrefix("b") ? .enGB : .enUS
+        let samples = try await worker.synthesize(text, voiceName: voice ?? voiceName, language: language)
         return NarrationAudio.buffer(fromSamples: samples)
     }
 }
@@ -81,12 +87,11 @@ private actor KokoroWorker {
 
     var isLoaded: Bool { tts != nil }
 
-    func synthesize(_ text: String, voiceName: String) throws -> [Float] {
+    func synthesize(_ text: String, voiceName: String, language: Language) throws -> [Float] {
         let tts = try loadIfNeeded()
         guard let voice = voices[voiceName + ".npy"] ?? voices[voiceName] else {
             throw KokoroSpeechEngine.KokoroError.unknownVoice(voiceName)
         }
-        let language: Language = voiceName.hasPrefix("b") ? .enGB : .enUS
         let (audio, _) = try tts.generateAudio(voice: voice, language: language, text: text)
         return audio
     }

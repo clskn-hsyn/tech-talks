@@ -54,7 +54,7 @@ enum BookImporter {
         guard pages.contains(where: { $0.contains { $0.isLetter } }) else { throw ImportError.scannedPDF }
         let pageParagraphs = PDFTextCleaner.paragraphs(fromPages: pages)
 
-        let chapters = chapterRanges(for: document).compactMap { range -> Chapter? in
+        var chapters = chapterRanges(for: document).compactMap { range -> Chapter? in
             let paragraphs = pageParagraphs[range.pages].flatMap { $0 }
             let chapter = BookBuilder.chapter(
                 title: range.title,
@@ -65,6 +65,7 @@ enum BookImporter {
         }
 
         guard !chapters.isEmpty else { throw ImportError.scannedPDF }
+        let cast = DialogueAnalyzer.analyze(&chapters)
 
         let attributes = document.documentAttributes ?? [:]
         let title = (attributes[PDFDocumentAttribute.titleAttribute] as? String)?.trimmingCharacters(in: .whitespaces)
@@ -76,7 +77,8 @@ enum BookImporter {
                 title: title?.isEmpty == false ? title! : fallbackTitle,
                 author: author,
                 format: .pdf,
-                chapters: chapters
+                chapters: chapters,
+                cast: cast
             ),
             cover: cover?.jpegData(compressionQuality: 0.8)
         )

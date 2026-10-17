@@ -60,6 +60,7 @@ struct SettingsView: View {
         Section {
             switch modelStore.state {
             case .ready:
+                Toggle("Character voices", isOn: $settings.characterVoices)
                 Picker("Narrator", selection: $settings.kokoroVoice) {
                     ForEach(KokoroSpeechEngine.voiceNames, id: \.self) { name in
                         Text(KokoroSpeechEngine.displayName(forVoice: name)).tag(name)
@@ -84,7 +85,7 @@ struct SettingsView: View {
             Text("Natural voice")
         } footer: {
             if case .ready = modelStore.state {
-                Text("Heart, Bella and Michael are good places to start. Switching voices re-reads from the current sentence.")
+                Text("With character voices on, each recurring character gets their own voice and the narrator reads the rest. Fine-tune them from the Characters button while listening.")
             } else if !KokoroSpeechEngine.isSupportedOnThisDevice {
                 Text("The natural voice runs only on a real iPhone or iPad, not in the Simulator.")
             } else {

@@ -3,6 +3,7 @@
 An iPhone app that reads your DRM-free ebooks aloud in a natural voice that runs entirely on the device.
 
 - **Natural voice, on-device:** [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) through [KokoroSwift](https://github.com/mlalma/kokoro-ios) and MLX. It's free, private, and works offline once downloaded. Apple's built-in voices are the fallback.
+- **Character voices:** each recurring character gets their own voice, and a narrator voice reads everything else. Tap the Characters button while listening to hear each voice and change it.
 - **EPUB and PDF import:** from Files, iCloud Drive, AirDrop or "Open in Narrator".
 - **Read-along view** that highlights the sentence being spoken. Tap any sentence to jump there.
 - **Gapless playback:** speed from 0.75× to 2.5× without chipmunk pitch, a sleep timer (minutes or end of chapter), and resume where you left off.
@@ -44,6 +45,23 @@ You can also copy `kokoro-v1_0.safetensors` and `voices.npz` into the app's fold
 
 If the app is killed for memory while the natural voice loads on an older iPhone, add the **Increased Memory Limit** capability in Signing & Capabilities.
 
+## Character voices
+
+When a book is imported, `DialogueAnalyzer` splits every sentence into narration and quoted speech, then works out who's talking:
+
+| In the text | Speaker |
+|---|---|
+| `“Out,” said Bob.` / `“Where?” Anna asked.` | The tagged name |
+| `“Indeed,” said Mister Darcy.` | Darcy (and he's male) |
+| `“Fine,” she said.` | The woman in the current conversation |
+| `Tom grinned. “Hello again.”` | Tom (an action beat by a known character) |
+| `“Why?”` / `“Because.”` with no tags | Speakers alternate |
+| `“I’m coming,” I said.` | The narrator's own voice (first-person books) |
+
+Then `VoiceCasting` gives everyone with at least two lines a voice that matches their gender and differs from the narrator. It prefers voices with the narrator's accent, and best-rated voices go to the characters who talk most. Voices you pick yourself stay picked.
+
+**Apple Intelligence pass:** on iOS 26 with Apple Intelligence turned on (an iPhone 15 Pro qualifies), the app also asks Apple's on-device language model who speaks each line. It starts with the chapter you're listening to and runs a chapter or so ahead, using the surrounding paragraphs the way a person would. That fixes untagged exchanges and ambiguous pronouns. It runs on the phone, costs nothing and is saved with the book. Apple's safety filters sometimes refuse violent or mature passages; those keep the rule-based guess. The Characters screen shows its progress.
+
 ## Tests
 
 The text pipeline lives in a plain Swift package with no UIKit dependency:
@@ -53,7 +71,7 @@ cd KindleNarrator/Packages/NarratorCore
 swift test
 ```
 
-The tests cover EPUB parsing (nav and NCX titles, DRM detection, paths), HTML-to-text extraction, number and abbreviation normalization, sentence splitting, PDF header/footer cleanup and book navigation. In Xcode, the KindleNarrator scheme's Test action runs the same suite.
+The tests cover EPUB parsing (nav and NCX titles, DRM detection, paths), HTML-to-text extraction, number and abbreviation normalization, quote splitting, speaker attribution, voice casting, sentence splitting, PDF header/footer cleanup and book navigation. In Xcode, the KindleNarrator scheme's Test action runs the same suite.
 
 ## How it works
 
@@ -71,15 +89,15 @@ NarrationPlayer ─▶ SpeechEngine.render(sentence) ─▶ AVAudioPCMBuffer (24
 
 | Path | What's there |
 |---|---|
-| `Packages/NarratorCore` | Book model, EPUB parser, text cleanup and sentence splitting. Pure Swift, unit tested. |
+| `Packages/NarratorCore` | Book model, EPUB parser, text cleanup, sentence splitting, dialogue and speaker detection, voice casting. Pure Swift, unit tested. |
 | `App/Library` | Importing books and storing the library (JSON in Application Support) |
-| `App/Playback` | Voice engines, model download, gapless player, lock-screen controls |
-| `App/Views` | Library, read-along player and voice settings screens |
+| `App/Playback` | Voice engines, model download, gapless player, lock-screen controls, Apple Intelligence speaker pass |
+| `App/Views` | Library, read-along player, characters and voice settings screens |
 | `project.yml` | XcodeGen project definition, including the Info.plist keys for background audio and "Open in" |
 
 ## Status and next steps
 
-This is the first working cut of phases 1–2 of the plan. It was written without access to a Mac, so **it has not been compiled yet**. Expect a few compiler fixes on the first build in Xcode. Every Swift file passes a syntax check, and the Kokoro, MLX and ZIPFoundation calls were checked against those libraries' sources at the pinned versions.
+This is the first working cut of phases 1–2 of the plan, plus character voices. It was written without access to a Mac, so **it has not been compiled yet**. Expect a few compiler fixes on the first build in Xcode. Every Swift file passes a syntax check, and the Kokoro, MLX and ZIPFoundation calls were checked against those libraries' sources at the pinned versions.
 
 Next up:
 

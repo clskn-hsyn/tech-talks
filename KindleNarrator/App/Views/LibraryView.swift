@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct LibraryView: View {
     @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var player: NarrationPlayer
+    @EnvironmentObject private var refiner: SpeakerRefiner
     @State private var showingImporter = false
     @State private var showingSettings = false
     @State private var path: [UUID] = []
@@ -25,6 +26,7 @@ struct LibraryView: View {
                             let entries = library.sortedEntries
                             for index in offsets {
                                 player.close(entries[index].id)
+                                refiner.stop(bookID: entries[index].id)
                                 library.delete(id: entries[index].id)
                             }
                         }

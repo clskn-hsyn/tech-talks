@@ -7,8 +7,11 @@ import AVFoundation
 /// changes instant and lets on-device and Apple voices share one playback path.
 protocol SpeechEngine: AnyObject {
     var displayName: String { get }
-    /// Renders `text` as mono PCM in `NarrationAudio.format`.
-    func render(_ text: String) async throws -> AVAudioPCMBuffer
+    /// Renders `text` as mono PCM in `NarrationAudio.format`. `voice` names a character's voice;
+    /// nil means the narrator. Engines without per-character voices ignore it.
+    func render(_ text: String, voice: String?) async throws -> AVAudioPCMBuffer
+    /// Whether `voice` is honoured, so the player knows character casting will be heard.
+    var supportsCharacterVoices: Bool { get }
 }
 
 enum NarrationAudio {

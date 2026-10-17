@@ -16,6 +16,8 @@ final class NarrationPlayer: ObservableObject {
     @Published private(set) var voiceName = ""
     @Published var notice: String?
     @Published private(set) var sleepTimer: SleepTimer?
+    /// Which Kokoro voice each speaker gets in the open book (empty when everyone uses the narrator).
+    @Published private(set) var castVoices: [String: String] = [:]
     @Published var rate: Float {
         didSet {
             timePitch.rate = rate
@@ -41,6 +43,7 @@ final class NarrationPlayer: ObservableObject {
     private let audioEngine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private let timePitch = AVAudioUnitTimePitch()
+    private let previewNode = AVAudioPlayerNode()
     private var nowPlaying: NowPlayingController?
 
     private var engine: SpeechEngine?
@@ -66,6 +69,8 @@ final class NarrationPlayer: ObservableObject {
         audioEngine.attach(timePitch)
         audioEngine.connect(playerNode, to: timePitch, format: NarrationAudio.format)
         audioEngine.connect(timePitch, to: audioEngine.mainMixerNode, format: NarrationAudio.format)
+        audioEngine.attach(previewNode)
+        audioEngine.connect(previewNode, to: audioEngine.mainMixerNode, format: NarrationAudio.format)
         timePitch.rate = rate
 
         nowPlaying = NowPlayingController(player: self)
@@ -85,6 +90,7 @@ final class NarrationPlayer: ObservableObject {
             let saved = entry.position
             position = loaded.sentence(at: saved) == nil ? loaded.startPosition : saved
             resetQueue(at: position)
+            recast()
             library.markOpened(id: entry.id)
             nowPlaying?.update()
         } catch {
@@ -105,15 +111,8 @@ final class NarrationPlayer: ObservableObject {
     // MARK: - Transport
 
     func play() {
-        guard book != nil else { return }
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, policy: .longFormAudio)
-            try AVAudioSession.sharedInstance().setActive(true)
-            if !audioEngine.isRunning { try audioEngine.start() }
-        } catch {
-            notice = "Audio couldn't start: \(error.localizedDescription)"
-            return
-        }
+        guard book != nil, startAudio() else { return }
+        previewNode.stop()
         prepareEngineIfNeeded()
         if scheduled.isEmpty && nextToSchedule == nil { nextToSchedule = position }
         isPlaying = true
@@ -129,6 +128,18 @@ final class NarrationPlayer: ObservableObject {
         playerNode.pause()
         savePosition()
         nowPlaying?.update()
+    }
+
+    private func startAudio() -> Bool {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, policy: .longFormAudio)
+            try AVAudioSession.sharedInstance().setActive(true)
+            if !audioEngine.isRunning { try audioEngine.start() }
+            return true
+        } catch {
+            notice = "Audio couldn't start: \(error.localizedDescription)"
+            return false
+        }
     }
 
     func togglePlayback() {
@@ -193,11 +204,76 @@ final class NarrationPlayer: ObservableObject {
 
     /// Call after the voice settings change; upcoming audio is re-rendered in the new voice.
     func voiceSettingsChanged() {
-        guard settings.voiceKey != engineVoiceKey || engine == nil else { return }
-        engine = nil
+        // Also re-run when the natural voice has just been downloaded while an Apple voice stood in.
+        let kokoroNowAvailable = settings.engine == .kokoro && !(engine is KokoroSpeechEngine)
+            && modelStore.installedFiles != nil
+        guard settings.voiceKey != engineVoiceKey || engine == nil || kokoroNowAvailable else { return }
+        // Keep the loaded Kokoro model when only the narrator voice or casting changed.
+        let reuseKokoro = settings.engine == .kokoro && engine is KokoroSpeechEngine
+            && engineVoiceKey?.hasPrefix("kokoro:") == true
+        if reuseKokoro, let kokoro = engine as? KokoroSpeechEngine {
+            kokoro.voiceName = settings.kokoroVoice
+            engineVoiceKey = settings.voiceKey
+            voiceName = kokoro.displayName
+        } else {
+            engine = nil
+            prepareEngineIfNeeded()
+        }
+        recast()
+        rerenderUpcoming()
+    }
+
+    /// Call after the listener picks a different voice for a character.
+    func castChanged() {
+        recast()
+        rerenderUpcoming()
+    }
+
+    /// Takes a newer copy of the open book, such as one with re-labelled speakers.
+    func bookDidUpdate(_ updated: Book) {
+        guard updated.id == book?.id else { return }
+        book = updated
+        recast()
+        // Sentences already queued keep their voices; everything after is rendered again.
         voiceGeneration += 1
         cache.removeAll()
-        prepareEngineIfNeeded()
+        pump()
+    }
+
+    /// Plays a short sample in a character voice without moving the reading position.
+    func previewVoice(_ voice: String, saying sample: String) {
+        guard let kokoro = engine as? KokoroSpeechEngine ?? makeKokoroEngine() else {
+            notice = "Voice previews need the natural voice. Download it in Settings."
+            return
+        }
+        pause()
+        guard startAudio() else { return }
+        Task { [weak self] in
+            do {
+                let buffer = try await kokoro.render(sample, voice: voice)
+                guard let self else { return }
+                self.previewNode.stop()
+                self.previewNode.scheduleBuffer(buffer, completionHandler: nil)
+                self.previewNode.play()
+            } catch {
+                self?.notice = "Couldn't play the preview: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func recast() {
+        guard let book, let entryID, settings.engine == .kokoro, settings.characterVoices,
+              engine?.supportsCharacterVoices ?? true else {
+            castVoices = [:]
+            return
+        }
+        let overrides = library.entry(id: entryID)?.voiceOverrides ?? [:]
+        castVoices = VoiceCasting.assign(cast: book.cast, narrator: settings.kokoroVoice, overrides: overrides)
+    }
+
+    private func rerenderUpcoming() {
+        voiceGeneration += 1
+        cache.removeAll()
         seek(to: position)
     }
 
@@ -230,8 +306,8 @@ final class NarrationPlayer: ObservableObject {
         guard engine == nil || engineVoiceKey != settings.voiceKey else { return }
         switch settings.engine {
         case .kokoro:
-            if let files = modelStore.installedFiles, KokoroSpeechEngine.isSupportedOnThisDevice {
-                engine = KokoroSpeechEngine(modelURL: files.model, voicesURL: files.voices, voiceName: settings.kokoroVoice)
+            if let kokoro = makeKokoroEngine() {
+                engine = kokoro
             } else {
                 engine = AppleSpeechEngine(voiceIdentifier: settings.appleVoiceIdentifier)
                 notice = KokoroSpeechEngine.isSupportedOnThisDevice
@@ -243,11 +319,18 @@ final class NarrationPlayer: ObservableObject {
         }
         engineVoiceKey = settings.voiceKey
         voiceName = engine?.displayName ?? ""
+        recast()
+    }
+
+    private func makeKokoroEngine() -> KokoroSpeechEngine? {
+        guard let files = modelStore.installedFiles, KokoroSpeechEngine.isSupportedOnThisDevice else { return nil }
+        return KokoroSpeechEngine(modelURL: files.model, voicesURL: files.voices, voiceName: settings.kokoroVoice)
     }
 
     private func fallBackToAppleVoice(because error: Error) {
         engine = AppleSpeechEngine(voiceIdentifier: settings.appleVoiceIdentifier)
         voiceName = engine?.displayName ?? ""
+        recast()
         voiceGeneration += 1
         cache.removeAll()
         notice = "The natural voice couldn't load (\(error.localizedDescription)), so an Apple voice is reading."
@@ -339,7 +422,8 @@ final class NarrationPlayer: ObservableObject {
         prepareEngineIfNeeded()
         guard let engine,
               let target = positions(from: nextToSchedule, count: renderAhead).first(where: { cache[$0] == nil }),
-              let text = book.sentence(at: target) else { return }
+              book.sentence(at: target) != nil else { return }
+        let parts = voicedParts(of: target, in: book)
 
         let generation = voiceGeneration
         let pause = book.chapters[target.chapter].paragraphEnds.contains(target.sentence) ? 0.45 : 0.12
@@ -349,7 +433,13 @@ final class NarrationPlayer: ObservableObject {
             var rendered: AVAudioPCMBuffer?
             var failure: Error?
             do {
-                rendered = try await engine.render(text)
+                var buffers: [AVAudioPCMBuffer] = []
+                for (index, part) in parts.enumerated() {
+                    // A short breath where the voice changes, like a reader turning to a character.
+                    if index > 0 { buffers.append(NarrationAudio.silence(seconds: 0.12)) }
+                    buffers.append(try await engine.render(part.text, voice: part.voice))
+                }
+                rendered = NarrationAudio.concatenate(buffers)
             } catch {
                 failure = error
             }
@@ -373,6 +463,25 @@ final class NarrationPlayer: ObservableObject {
             }
             self.pump()
         }
+    }
+
+    /// The sentence split into runs of text that share a voice. Narration and unattributed
+    /// dialogue stay with the narrator, so most sentences are still a single render.
+    private func voicedParts(of target: BookPosition, in book: Book) -> [(text: String, voice: String?)] {
+        let segments = book.chapters[target.chapter].segments(forSentence: target.sentence)
+        var parts: [(text: String, voice: String?)] = []
+        for segment in segments {
+            let voice = castVoices.isEmpty ? nil : segment.speaker.flatMap { castVoices[$0] }
+            let narratorVoice = castVoices[DialogueAnalyzer.narratorSpeaker]
+            // The narrator's own voice and "no voice" are the same thing.
+            let normalized = voice == narratorVoice ? nil : voice
+            if let last = parts.last, last.voice == normalized {
+                parts[parts.count - 1].text += " " + segment.text
+            } else {
+                parts.append((segment.text, normalized))
+            }
+        }
+        return parts
     }
 
     // MARK: - Persistence and system events

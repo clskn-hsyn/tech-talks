@@ -8,6 +8,8 @@ struct PlayerView: View {
 
     @State private var showingChapters = false
     @State private var showingSettings = false
+    @State private var showingCast = false
+    @EnvironmentObject private var refiner: SpeakerRefiner
     @State private var followsAudio = true
 
     var body: some View {
@@ -33,12 +35,20 @@ struct PlayerView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
+                Button { showingCast = true } label: {
+                    Label("Characters", systemImage: "person.2.wave.2")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Button { showingSettings = true } label: {
                     Label("Voice", systemImage: "waveform")
                 }
             }
         }
-        .onAppear { player.open(entry) }
+        .onAppear {
+            player.open(entry)
+            refiner.start(bookID: entry.id)
+        }
         .sheet(isPresented: $showingChapters) {
             if let book = player.book {
                 ChapterList(book: book, current: player.position.chapter) { index in
@@ -48,6 +58,7 @@ struct PlayerView: View {
             }
         }
         .sheet(isPresented: $showingSettings) { SettingsView() }
+        .sheet(isPresented: $showingCast) { CastView(entryID: entry.id) }
         .alert("Heads up", isPresented: Binding(
             get: { player.notice != nil },
             set: { if !$0 { player.notice = nil } }

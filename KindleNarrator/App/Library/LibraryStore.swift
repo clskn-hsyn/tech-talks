@@ -13,6 +13,8 @@ struct LibraryEntry: Codable, Identifiable, Equatable {
     var progress: Double
     var chapterCount: Int
     var characterCount: Int
+    /// Voices the listener picked for characters in this book, by character name.
+    var voiceOverrides: [String: String]?
 }
 
 /// The books on this device. Each parsed book is stored as JSON next to a small index,
@@ -50,6 +52,24 @@ final class LibraryStore: ObservableObject {
         let book = try JSONDecoder().decode(Book.self, from: data)
         cachedBook = book
         return book
+    }
+
+    /// Stores an updated book, such as one whose speakers were re-labelled.
+    func saveBook(_ book: Book) {
+        do {
+            try JSONEncoder().encode(book).write(to: booksDirectory.appendingPathComponent("\(book.id).json"), options: .atomic)
+            if cachedBook?.id == book.id || cachedBook == nil { cachedBook = book }
+        } catch {
+            importMessage = "Couldn't save changes to “\(book.title)”: \(error.localizedDescription)"
+        }
+    }
+
+    func setVoice(_ voice: String?, for character: String, in id: UUID) {
+        update(id) { entry in
+            var overrides = entry.voiceOverrides ?? [:]
+            overrides[character] = voice
+            entry.voiceOverrides = overrides.isEmpty ? nil : overrides
+        }
     }
 
     func coverImage(id: UUID) -> UIImage? {

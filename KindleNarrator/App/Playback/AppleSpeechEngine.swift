@@ -29,7 +29,9 @@ final class AppleSpeechEngine: NSObject, SpeechEngine, AVSpeechSynthesizerDelega
             }
     }
 
-    func render(_ text: String) async throws -> AVAudioPCMBuffer {
+    var supportsCharacterVoices: Bool { false }
+
+    func render(_ text: String, voice _: String?) async throws -> AVAudioPCMBuffer {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = voice
         // Playback speed is applied by the player's time-pitch unit, not here.
