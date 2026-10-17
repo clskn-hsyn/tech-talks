@@ -1,0 +1,96 @@
+# Generate the Xcode project with XcodeGen:  brew install xcodegen && xcodegen
+name: KindleNarrator
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    # Swift 5 language mode: the Swift 6 data-race checks are worth adopting later,
+    # but MLX and AVFoundation callbacks make that a project of its own.
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Set your team here or in Xcode › Signing & Capabilities.
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+
+packages:
+  NarratorCore:
+    path: Packages/NarratorCore
+  KokoroSwift:
+    url: https://github.com/mlalma/kokoro-ios
+    exactVersion: 1.0.11
+  MLXSwift:
+    url: https://github.com/ml-explore/mlx-swift
+    exactVersion: 0.30.2
+  MLXUtilsLibrary:
+    url: https://github.com/mlalma/MLXUtilsLibrary.git
+    exactVersion: 0.0.6
+
+targets:
+  KindleNarrator:
+    type: application
+    platform: iOS
+    sources:
+      - App
+    dependencies:
+      - package: NarratorCore
+      - package: KokoroSwift
+      - package: MLXSwift
+        product: MLX
+      - package: MLXUtilsLibrary
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.narrator
+        PRODUCT_NAME: Narrator
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_PREVIEWS: YES
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Narrator
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # Keep reading with the screen locked.
+        UIBackgroundModes:
+          - audio
+        # Show the app's folder in Files and Finder so model files or books can be dropped in.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: false
+        # Offer "Open in Narrator" for EPUB and PDF files.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: EPUB book
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - org.idpf.epub-container
+          - CFBundleTypeName: PDF document
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - com.adobe.pdf
+        ITSAppUsesNonExemptEncryption: false
+
+schemes:
+  KindleNarrator:
+    build:
+      targets:
+        KindleNarrator: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - package: NarratorCore/NarratorCoreTests
